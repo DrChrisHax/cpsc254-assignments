@@ -1,3 +1,12 @@
+# ══════════════════════════════════════════════════════════════════
+# gridworld_policy_iteration.py - Reinforcement learning: Agent navigation a Gridworld
+# Assignment 1, Question 4
+# Author: Sinan Abdul-Hafiz
+
+# Perform a classification using the MLPClassifier in scikit-learn with only one hidden layer with 3
+# neurons and one output neuron.
+# ══════════════════════════════════════════════════════════════════
+
 """
 This program implements Policy Iteration in a Gridworld with:
 - Obstacles (impassable black cells)
@@ -135,28 +144,107 @@ def random_policy(env):
             pi[r, c, :] = 1 / 4
     return pi
 
+
+# ══════════════════════════════════════════════════════════════════
+# (a) Policy Evaluation
+#
+# Performs one full sweep over all non-terminal, non-obstacle states
+# and updates V(s) using the Bellman expectation equation:
+#
+#   V(s) = Σ_a π(a|s) · Σ_{s'} P(s'|s,a) · [R(s,a,s') + γ·V(s')]
+#
+# where:
+#   π(a|s)      = probability of taking action a in state s (from pi)
+#   P(s'|s,a)   = transition probability (accounts for stochastic noise)
+#   R(s,a,s')   = immediate reward
+#   γ (gamma)   = discount factor
+# ══════════════════════════════════════════════════════════════════
 def policy_evaluation(env, V, pi, gamma, noise):
     V_new = V.copy()
-    """
-    TODO: Implement one swep policy evaluation to compute V(s) given policy pi:
-    update V(s) given policy pi, the environment dynamics, and gamma
-    """
+    for r in range(env.H):
+        for c in range(env.W):
+            s = (r, c)
+            # Skip terminal and obstacle states — their value is fixed
+            if env.is_terminal(s) or env.is_obstacle(s):
+                continue
+            v = 0.0
+            for a in ACTIONS:
+                pi_a = pi[r, c, a]          # π(a|s): probability of action a under current policy
+                if pi_a == 0:
+                    continue
+                # Sum over all possible next states weighted by transition probabilities
+                for s_next, prob in transition_dist(env, s, a, noise):
+                    r_val = env.reward(s, a, s_next)
+                    v += pi_a * prob * (r_val + gamma * V[s_next[0], s_next[1]])
+            V_new[r, c] = v
     return V_new
 
+
+# ══════════════════════════════════════════════════════════════════
+# (b) Policy Improvement
+#
+# For each state s, compute the action-value Q(s,a) for all actions:
+#
+#   Q(s,a) = Σ_{s'} P(s'|s,a) · [R(s,a,s') + γ·V(s')]
+#
+# Then set π(s) to be a deterministic greedy policy:
+#   π(s) = argmax_a Q(s,a)
+#
+# If the greedy policy matches the old policy everywhere, it is stable.
+# ══════════════════════════════════════════════════════════════════
 def policy_improvement(env, V, gamma, noise):
     pi_new = np.zeros((env.H, env.W, 4))
-    """
-    TODO: Implement policy improvement: update pi greedily based on current V(s).
-    """
-    return pi_new, True
+    stable = True                           # assume stable until a change is found
+    for r in range(env.H):
+        for c in range(env.W):
+            s = (r, c)
+            # Skip terminal and obstacle states — no action needed
+            if env.is_terminal(s) or env.is_obstacle(s):
+                continue
+            # Compute Q(s,a) for every action
+            q_values = np.zeros(4)
+            for a in ACTIONS:
+                for s_next, prob in transition_dist(env, s, a, noise):
+                    r_val = env.reward(s, a, s_next)
+                    q_values[a] += prob * (r_val + gamma * V[s_next[0], s_next[1]])
+            # Greedy action: pick the action with the highest Q-value
+            best_a = np.argmax(q_values)
+            # Detect instability: if current policy's best action differs from new best
+            old_best = np.argmax(pi_new[r, c, :]) if pi_new[r, c, :].sum() > 0 else -1
+            if old_best != best_a:
+                stable = False
+            # Set deterministic greedy policy (probability 1 for best action)
+            pi_new[r, c, best_a] = 1.0
+    return pi_new, stable
 
+
+# ══════════════════════════════════════════════════════════════════
+# (c) Policy Iteration Loop
+#
+# Alternates between:
+#   1. Policy Evaluation  — run multiple sweeps until V converges
+#                           (max_eval_iters sweeps or until Δ < tol)
+#   2. Policy Improvement — update π greedily from the converged V
+#
+# Stops when policy improvement reports no change (stable = True).
+# ══════════════════════════════════════════════════════════════════
 def policy_iteration(env, gamma, noise, max_eval_iters=100, tol=1e-6):
-    V = np.zeros((env.H, env.W))
+    V  = np.zeros((env.H, env.W))
     pi = random_policy(env)
     stable = False
-    """
-    TODO: Combine policy evaluation and improvement to perform policy iteration.
-    """
+
+    while not stable:
+        # --- Policy Evaluation: iterate until V converges ---
+        for _ in range(max_eval_iters):
+            V_new = policy_evaluation(env, V, pi, gamma, noise)
+            delta = np.max(np.abs(V_new - V))   # max change across all states
+            V = V_new
+            if delta < tol:                      # V has converged, stop early
+                break
+
+        # --- Policy Improvement: greedily update pi from converged V ---
+        pi, stable = policy_improvement(env, V, gamma, noise)
+
     return V, pi
 
 def extract_path(env, pi, start, max_steps=50):
@@ -247,7 +335,7 @@ class Viewer:
             self.ax.add_patch(plt.Rectangle((fc-0.5, fr-0.5), 1, 1, color="gold"))
         # Draw start state (red outline)
         sr, sc = self.start
-        self.ax.add_patch(plt.Rectangle((sc-0.5, sr-0.5), 1, 1, fill=False, linewidth=3.0, edgecolor="red")                          )       
+        self.ax.add_patch(plt.Rectangle((sc-0.5, sr-0.5), 1, 1, fill=False, linewidth=3.0, edgecolor="red"))
 
         # Draw path (red circles and line)
         if self.path:
