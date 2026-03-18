@@ -1,11 +1,11 @@
-"""
-MLP_classifier.py - The Multilayer Perceptron Classifier
-Assignment 1, Question 2 Part 2
-Author: Sinan Abdul-Hafiz
+# ══════════════════════════════════════════════════════════════════
+# MLP_classifier.py - The Multilayer Perceptron Classifier
+# Assignment 1, Question 2 Part 2
+# Author: Sinan Abdul-Hafiz
 
-Perform a classification using the MLPClassifier in scikit-learn with only one hidden layer with 3
-neurons and one output neuron.
-"""
+# Perform a classification using the MLPClassifier in scikit-learn with only one hidden layer with 3
+# neurons and one output neuron.
+# ══════════════════════════════════════════════════════════════════
 
 import numpy as np
 from sklearn.datasets import load_iris
