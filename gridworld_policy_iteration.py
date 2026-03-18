@@ -192,31 +192,25 @@ def policy_evaluation(env, V, pi, gamma, noise):
 #
 # If the greedy policy matches the old policy everywhere, it is stable.
 # ══════════════════════════════════════════════════════════════════
-def policy_improvement(env, V, gamma, noise):
+def policy_improvement(env, V, gamma, noise, pi_old=None):
     pi_new = np.zeros((env.H, env.W, 4))
-    stable = True                           # assume stable until a change is found
+    stable = True
     for r in range(env.H):
         for c in range(env.W):
             s = (r, c)
-            # Skip terminal and obstacle states — no action needed
             if env.is_terminal(s) or env.is_obstacle(s):
                 continue
-            # Compute Q(s,a) for every action
             q_values = np.zeros(4)
             for a in ACTIONS:
                 for s_next, prob in transition_dist(env, s, a, noise):
                     r_val = env.reward(s, a, s_next)
                     q_values[a] += prob * (r_val + gamma * V[s_next[0], s_next[1]])
-            # Greedy action: pick the action with the highest Q-value
             best_a = np.argmax(q_values)
-            # Detect instability: if current policy's best action differs from new best
-            old_best = np.argmax(pi_new[r, c, :]) if pi_new[r, c, :].sum() > 0 else -1
-            if old_best != best_a:
+            # Compare against the OLD policy, not the one being built
+            if pi_old is not None and np.argmax(pi_old[r, c, :]) != best_a:
                 stable = False
-            # Set deterministic greedy policy (probability 1 for best action)
             pi_new[r, c, best_a] = 1.0
     return pi_new, stable
-
 
 # ══════════════════════════════════════════════════════════════════
 # (c) Policy Iteration Loop
@@ -243,7 +237,7 @@ def policy_iteration(env, gamma, noise, max_eval_iters=100, tol=1e-6):
                 break
 
         # --- Policy Improvement: greedily update pi from converged V ---
-        pi, stable = policy_improvement(env, V, gamma, noise)
+        pi, stable = policy_improvement(env, V, gamma, noise, pi_old=pi)
 
     return V, pi
 
