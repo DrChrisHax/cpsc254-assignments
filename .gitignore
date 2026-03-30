@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 GasProperties_norm.csv
+
+datasets/
+*.pth
