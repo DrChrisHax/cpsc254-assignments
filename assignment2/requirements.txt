@@ -1,0 +1,13 @@
+torch
+torchvision
+numpy
+pillow
+opencv-python-headless
+ultralytics
+tqdm
+seaborn
+pandas
+matplotlib
+scipy
+psutil
+pi-heif

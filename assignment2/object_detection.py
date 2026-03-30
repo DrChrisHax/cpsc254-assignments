@@ -73,7 +73,8 @@ def load_model(model_name='yolov5s', force_reload=False):
                 'ultralytics/yolov5',
                 model_name,
                 force_reload=force_reload,
-                verbose=False
+                verbose=False,
+                trust_repo=True
             )
     except Exception:
         with hard_silence():
@@ -110,8 +111,8 @@ def extract_predictions(results):
     df = results.pandas().xyxy[0]
     if not df.empty:
         print("\n✅ Objects detected:")
-        # TODO: Print the object names and confidences in the
-        # format: " - <name>: <confidence>"
+        for _, row in df.iterrows():
+            print(f" - {row['name']}: {row['confidence']:.2f}")
     else:
         print("\n⚠️ No objects detected.")
     return df
@@ -128,7 +129,12 @@ def draw_bounding_boxes(image_cv, predictions):
     if predictions.empty:
         return image_cv
 
-    # TODO: Students should implement drawing bounding boxes and labels
+    for _, row in predictions.iterrows():
+        x1, y1, x2, y2 = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
+        label = f"{row['name']} {row['confidence']:.2f}"
+        cv2.rectangle(image_cv, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(image_cv, label, (x1, max(y1 - 10, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     return image_cv
 
 
@@ -160,12 +166,12 @@ def print_bounding_boxes(predictions):
     for _, row in predictions.iterrows():
         try:
             # TODO: Get the coordinates, label, and confidence from the row
-            x1 = ???
-            y1 = ???
-            x2 = ???
-            y2 = ???
-            label = ???
-            conf = ???
+            x1 = int(row['xmin'])
+            y1 = int(row['ymin'])
+            x2 = int(row['xmax'])
+            y2 = int(row['ymax'])
+            label = row['name']
+            conf = row['confidence']
             print(f"{label}: {x1},{y1},{x2},{y2} (conf={conf:.2f})")
         except Exception:
             # Fallback: print the raw row if formatting fails
@@ -189,6 +195,10 @@ def run_object_detection(img_path='objects.jpg', model_name='yolov5s'):
 
     predictions = extract_predictions(results)
 
+    if not predictions.empty:
+        predicted_names = predictions['name'].tolist()
+        print("\nPredicted object names:", predicted_names)
+
     # Print bounding boxes (newly added feature)
     print_bounding_boxes(predictions)
 
@@ -202,4 +212,4 @@ def run_object_detection(img_path='objects.jpg', model_name='yolov5s'):
 # ==============================================================
 
 if __name__ == '__main__':
-    run_object_detection('../datasets/objects/objects.jpg', 'yolov5s')
+    run_object_detection('datasets/objects/objects.jpg', 'yolov5s')
