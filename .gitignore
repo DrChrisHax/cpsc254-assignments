@@ -5,3 +5,6 @@ GasProperties_norm.csv
 
 datasets/
 *.pth
+
+CLAUDE.md
+.claude/
