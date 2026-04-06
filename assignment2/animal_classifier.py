@@ -80,64 +80,61 @@ def simple_singular(word: str) -> str:
 
 
 def load_imagenet_labels_from_torch(weights_enum):
-    """
-    Attempt to extract ImageNet label strings from a torchvision Weights enum object.
-    TODO: students should inspect weights_enum.meta and return a list of 1000 label strings
-    if available. Return None if labels cannot be found.
-    """
-    # TODO: implement extraction from weights_enum.meta["categories"] (or equivalent)
-    raise NotImplementedError("load_imagenet_labels_from_torch not implemented")    
-
+    try:
+        meta = weights_enum.meta
+        if "categories" in meta:
+            return list(meta["categories"])
+    except Exception:
+        pass
+    return None
 
 def download_imagenet_labels():
-    """
-    Download canonical ImageNet label list used in many PyTorch examples.
-    TODO: implement network download and parsing of the 1000 labels.
-    """
-    # TODO: implement downloading from
-    #  https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt
-    # and return list of 1000 label strings, or None on failure.
-    raise NotImplementedError("download_imagenet_labels not implemented")
-
+    url = "https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt"
+    try:
+        response = urllib_request.urlopen(url, timeout=10)
+        text = response.read().decode("utf-8")
+        labels = [line.strip() for line in text.strip().splitlines() if line.strip()]
+        if len(labels) == 1000:
+            return labels
+    except Exception:
+        pass
+    return None
 
 def load_imagenet_labels(model_name="resnet50"):
-    """
-    Attempt to obtain a list of ImageNet human-readable labels (1000 strings).
-    Strategy (students should implement):
-      1) try torchvision weights metadata
-      2) fallback to downloading canonical list
-      3) if both fail, return None
-    Return the list of labels from PyTorch or None.
-    """
-    # TODO: implement the three-stage strategy.
-    raise NotImplementedError("load_imagenet_labels not implemented")
-
+    # 1) try torchvision weights metadata
+    try:
+        weights_cls_name = model_name.capitalize().replace("net", "Net") + "_Weights"
+        weights_enum = getattr(torchvision.models, weights_cls_name, None)
+        if weights_enum is not None:
+            default_weights = weights_enum.DEFAULT
+            labels = load_imagenet_labels_from_torch(default_weights)
+            if labels is not None:
+                return labels
+    except Exception:
+        pass
+    # 2) fallback to download
+    labels = download_imagenet_labels()
+    if labels is not None:
+        return labels
+    # 3) fail
+    return None
 
 def load_pretrained_resnet(name: str = "resnet50", device='cpu'):
-    """
-    Instantiate a torchvision ResNet architecture and return (model, preprocess[, weights_enum]).
-    Students should:
-      - attempt to use torchvision 'weights' API when available to get both model and transforms
-      - otherwise construct a model with pretrained=False and provide a reasonable preprocess transform
-    This skeleton returns a bare ResNet architecture (no pretrained weights) and a basic preprocess pipeline.
-    """
     name = name.lower()
     if name not in ("resnet18", "resnet34", "resnet50", "resnet101", "resnet152"):
         raise ValueError(f"Unsupported model '{name}'. Choose one of resnet18/34/50/101/152")
     model_fn = getattr(torchvision.models, name)
 
-    # Minimal working instantiation (no pretrained weights).
-    # TODO: students should replace this with code that uses torchvision weights (if available)
-    # and returns weights_enum and transforms when possible.
+    weights_enum = None
     try:
-        # TODO: implement torchvision weights API usage here
-        weights_enum = getattr(???)
-        weights = weights_enum.???
-        model = model_fn(weights=???).to(???)
-        preprocess = ???.transforms()
+        weights_cls_name = name.capitalize().replace("net", "Net") + "_Weights"
+        weights_enum_cls = getattr(torchvision.models, weights_cls_name)
+        weights = weights_enum_cls.DEFAULT
+        model = model_fn(weights=weights).to(device)
+        preprocess = weights.transforms()
+        weights_enum = weights
     except Exception:
-        # TODO: implement fallback to non-pretrained model and basic preprocess
-        model = model_fn(???).to(???)
+        model = model_fn(pretrained=True).to(device)
         preprocess = torchvision.transforms.Compose([
             torchvision.transforms.Resize(256),
             torchvision.transforms.CenterCrop(224),
@@ -149,23 +146,35 @@ def load_pretrained_resnet(name: str = "resnet50", device='cpu'):
     model.eval()
     return model, preprocess, weights_enum
 
-
 def model_summary(model: nn.Module):
-    """
-    Produce a small dictionary summarizing the model (parameter counts, number of conv/linear layers, etc).
-    TODO: Students should fill out useful statistics (the skeleton returns a minimal structure).
-    """
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    # TODO: implement a full summary of the model.
+
+    conv_count = 0
+    conv_out_channels = []
+    bn_count = 0
+    linear_count = 0
+    layers_with_params = 0
+
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            conv_count += 1
+            conv_out_channels.append(m.out_channels)
+        elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+            bn_count += 1
+        elif isinstance(m, nn.Linear):
+            linear_count += 1
+        if hasattr(m, 'weight') and m.weight is not None:
+            layers_with_params += 1
+
     summary = {
         "total_params": total_params,
         "trainable_params": trainable_params,
-        "conv_layers_count": ???,
-        "conv_out_channels": ???,
-        "batchnorm_count": ???,
-        "linear_layers_count": ???,
-        "layers_with_params_count": ???,
+        "conv_layers_count": conv_count,
+        "conv_out_channels": conv_out_channels,
+        "batchnorm_count": bn_count,
+        "linear_layers_count": linear_count,
+        "layers_with_params_count": layers_with_params,
         "top_level_modules": [type(m).__name__ for m in model.children()],
     }
     return summary
@@ -265,13 +274,8 @@ def build_mapping_from_folders_to_imagenet(folder_names, imagenet_labels, fuzzy_
 
 
 def predict_image(model, preprocess, image_path: Path, device='cpu'):
-    """
-    Run a forward pass on the given image and return (pred_idx, prob).
-    Students should ensure preprocessing matches the model's expected transforms.
-    """
-    # TODO: Open the image, convert it to RGB, apply preprocess, move to device
-    img = ???
-    inp = ???
+    img = Image.open(image_path).convert("RGB")
+    inp = preprocess(img).unsqueeze(0).to(device)
     with torch.no_grad():
         out = model(inp)
         probs = torch.nn.functional.softmax(out, dim=1)
@@ -293,7 +297,7 @@ def main(args):
     print(f"Using device: {device}")
 
     # Load model (skeleton returns a non-pretrained architecture)
-    model, preprocess = load_pretrained_resnet(args.model, device=device)
+    model, preprocess, _ = load_pretrained_resnet(args.model, device=device)
     imagenet_labels = load_imagenet_labels(args.model)
     if imagenet_labels is None:
         print("Warning: Could not obtain ImageNet labels. Provide --label-map to map folders to indices or enable internet so labels can be downloaded.")
@@ -436,7 +440,8 @@ def main(args):
         print("Warning: ImageNet label strings unavailable (download failed). Provide --label-map or enable internet.")
     print("Done.")
 
-    # TODO: save model state_dict to disk so unit tests can load it
+    torch.save(model.state_dict(), "animal_classifier.pth")
+    print("Model saved to animal_classifier.pth")
 
 
 if __name__ == "__main__":
