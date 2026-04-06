@@ -22,7 +22,7 @@ import numpy as np
 import pytesseract
 
 # Tesseract executable path override (if needed)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
 # ---------- constants & regex ----------
 PRICE_RE = re.compile(r'\$?\s*\d{1,3}(?:[.,]\d{1,2})?$')
@@ -47,110 +47,242 @@ def list_images(folder):
 
 # ---------- image preprocessing ----------
 def preprocess(img_bgr, target_w=1200):
-    """
-    Preprocess BGR image (numpy array) into a thresholded grayscale image suitable for OCR.
-    Steps to implement (students):
-      - convert to grayscale
-      - optionally resize to target_w preserving aspect ratio
-      - apply blur and Otsu thresholding
-      - small morphological closing to join broken characters
-      - return processed grayscale/thresholded numpy array
-    """
-    # TODO: implement preprocessing pipeline using cv2 operations described above
-    raise NotImplementedError("preprocess: implement grayscale resize/blur/threshold/morphology")
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    if w > 0 and w != target_w:
+        scale = target_w / w
+        new_h = int(h * scale)
+        gray = cv2.resize(gray, (target_w, new_h), interpolation=cv2.INTER_LINEAR)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    return thresh
 
 # ---------- OCR wrapper (defined and used consistently) ----------
 def run_tesseract_image_to_data(img_gray, psm=6, oem=3):
-    """Return pytesseract.image_to_data dict for the provided grayscale image (numpy array)."""
-    # TODO: implement wrapper that converts numpy array to PIL.Image and calls
-    #       pytesseract.image_to_data(..., output_type=pytesseract.Output.DICT, config=cfg)
-    #       Where cfg should include `--oem {oem} --psm {psm}`
-    raise NotImplementedError("run_tesseract_image_to_data: call pytesseract.image_to_data here")
+    pil_img = Image.fromarray(img_gray)
+    cfg = f'--oem {oem} --psm {psm}'
+    data = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DICT, config=cfg)
+    return data
 
 # ---------- utilities ----------
 def normalize_price_token(tok):
-    """
-    Normalize price-like token into float (rounded to 2 dp), or return None if invalid.
-    Students should:
-      - strip currency symbols and whitespace
-      - normalize common OCR confusions (O->0, o->0)
-      - convert commas to dots when appropriate
-      - remove non-numeric characters, parse float, round to 2 decimals
-    """
-    # TODO: implement normalization and robust parsing
-    raise NotImplementedError("normalize_price_token: TODO implement token -> float conversion")
-
+    if tok is None:
+        return None
+    tok = str(tok).strip()
+    tok = tok.replace('$', '').replace('€', '').replace('£', '').strip()
+    tok = tok.replace('O', '0').replace('o', '0')
+    tok = tok.replace('l', '1').replace('I', '1')
+    if ',' in tok and '.' not in tok:
+        parts = tok.split(',')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            tok = tok.replace(',', '.')
+        else:
+            tok = tok.replace(',', '')
+    elif ',' in tok and '.' in tok:
+        tok = tok.replace(',', '')
+    tok = re.sub(r'[^0-9.]', '', tok)
+    if not tok or tok == '.':
+        return None
+    try:
+        return round(float(tok), 2)
+    except ValueError:
+        return None
+    
 def token_looks_like_price(token):
-    """
-    Heuristic to quickly determine whether a text token could represent a price.
-    """
-    # TODO: implement quick heuristics similar to original: presence of $ . , or short digit groups
-    raise NotImplementedError("token_looks_like_price: TODO implement heuristic")
+    token = str(token).strip()
+    if not token:
+        return False
+    if '$' in token:
+        return True
+    if re.search(r'\d[.,]\d', token):
+        return True
+    cleaned = re.sub(r'[^0-9]', '', token)
+    if cleaned and 1 <= len(cleaned) <= 5:
+        return True
+    return False
 
 def is_footer_line(line_text):
-    """
-    Return True if line_text looks like a footer (survey, website, phone, etc).
-    """
-    # TODO: implement detection using SURVEY_FOOTERS and PHONE_RE
-    raise NotImplementedError("is_footer_line: TODO implement footer detection")
+    lower = line_text.lower()
+    for kw in SURVEY_FOOTERS:
+        if kw in lower:
+            return True
+    if PHONE_RE.search(line_text):
+        return True
+    return False
 
 def pick_store_name(top_lines):
-    """
-    Choose most likely store name from the top lines of the receipt.
-    Heuristics:
-      - ignore generic words like 'receipt'/'invoice' etc.
-      - prefer known common stores found in COMMON_STORES
-      - prefer lines with letters and not many digits
-      - fallback to first non-empty line or 'Unknown Store'
-    """
-    # TODO: implement selection heuristics described above
-    raise NotImplementedError("pick_store_name: TODO implement store name selection")
+    ignore_words = {'receipt', 'invoice', 'order', 'date', 'time', 'cashier', 'register',
+                    'store', 'phone', 'tel', 'fax', 'address'}
+    for line in top_lines:
+        lower = line.lower().strip()
+        if not lower:
+            continue
+        for store in COMMON_STORES:
+            if store in lower:
+                return line.strip()
+    for line in top_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.lower() in ignore_words:
+            continue
+        letters = sum(1 for c in stripped if c.isalpha())
+        digits = sum(1 for c in stripped if c.isdigit())
+        if letters > 2 and letters >= digits:
+            return stripped
+    for line in top_lines:
+        if line.strip():
+            return line.strip()
+    return 'Unknown Store'
 
 # ---------- token -> lines clustering ----------
 def cluster_tokens_into_lines(data):
-    """
-    Cluster Tesseract token dict into spatially grouped text lines.
-    Input: data dict as returned by pytesseract Output.DICT with keys like 'text','left','top','height','conf'
-    Output: list of {'tokens': [...], 'line_text': '...'} sorted top->bottom
-    """
-    # TODO: implement token parsing and clustering:
-    #   - build list of token dicts with numeric left/top/height/conf
-    #   - sort tokens by top, left
-    #   - group tokens whose 'top' is close into line buckets
-    #   - compute line_text by joining token['text'] by left order
-    raise NotImplementedError("cluster_tokens_into_lines: TODO implement clustering logic")
+    tokens = []
+    n = len(data.get('text', []))
+    for i in range(n):
+        text = str(data['text'][i]).strip()
+        if not text:
+            continue
+        try:
+            left = int(data['left'][i])
+            top = int(data['top'][i])
+            height = int(data['height'][i])
+            conf = float(data['conf'][i])
+        except (ValueError, TypeError):
+            continue
+        tokens.append({'text': text, 'left': left, 'top': top, 'height': height, 'conf': conf})
+
+    if not tokens:
+        return []
+
+    tokens.sort(key=lambda t: (t['top'], t['left']))
+    lines = []
+    current_line_tokens = [tokens[0]]
+    current_top = tokens[0]['top']
+    current_height = tokens[0]['height']
+
+    for tok in tokens[1:]:
+        threshold = max(current_height * 0.6, 8)
+        if abs(tok['top'] - current_top) <= threshold:
+            current_line_tokens.append(tok)
+        else:
+            current_line_tokens.sort(key=lambda t: t['left'])
+            line_text = ' '.join(t['text'] for t in current_line_tokens)
+            lines.append({'tokens': current_line_tokens, 'line_text': line_text})
+            current_line_tokens = [tok]
+            current_top = tok['top']
+            current_height = tok['height']
+
+    if current_line_tokens:
+        current_line_tokens.sort(key=lambda t: t['left'])
+        line_text = ' '.join(t['text'] for t in current_line_tokens)
+        lines.append({'tokens': current_line_tokens, 'line_text': line_text})
+
+    return lines
 
 # ---------- line parsing ----------
 def parse_line_for_item(line_obj, conf_threshold, max_item_price):
-    """
-    Parse a clustered line for an item / price / whether it's a total line.
-    Returns: (item_name or None, price or None, is_total_flag)
-    Students should implement heuristics:
-      - detect qty @ unit patterns (e.g., '3 @ 0.29')
-      - collect numeric candidates in the line, prefer rightmost candidate with sufficient conf
-      - filter out phone-like or long-int tokens
-      - normalize chosen candidate to a float price
-      - determine item name as text left of chosen token, cleaned up
-      - mark is_total if line contains TOTAL_KEYWORDS
-    """
-    # TODO: implement robust line parsing; this is the core logic used by process_image_file
-    raise NotImplementedError("parse_line_for_item: TODO implement item/price extraction heuristics")
+    tokens = line_obj['tokens']
+    line_text = line_obj['line_text']
+    lower_text = line_text.lower()
+    is_total = any(kw in lower_text for kw in TOTAL_KEYWORDS)
+
+    if is_footer_line(line_text):
+        return None, None, False
+
+    qty_match = re.search(r'(\d+)\s*[@xX]\s*(\$?\s*[\d.,]+)', line_text)
+    if qty_match:
+        qty = int(qty_match.group(1))
+        unit_price = normalize_price_token(qty_match.group(2))
+        if unit_price is not None:
+            total_price = round(qty * unit_price, 2)
+            item_name = line_text[:qty_match.start()].strip()
+            if not item_name:
+                item_name = line_text
+            item_name = re.sub(r'[\s]+', ' ', item_name).strip()
+            return item_name if item_name else None, total_price, is_total
+
+    candidates = []
+    for i, tok in enumerate(tokens):
+        if token_looks_like_price(tok['text']):
+            cleaned = re.sub(r'[^0-9]', '', tok['text'])
+            if LONG_INT_ONLY_RE.match(cleaned):
+                continue
+            if PHONE_RE.match(tok['text']):
+                continue
+            price = normalize_price_token(tok['text'])
+            if price is not None and price > 0:
+                candidates.append((i, tok, price))
+
+    if not candidates:
+        return None, None, is_total
+
+    best = None
+    for i, tok, price in reversed(candidates):
+        if tok['conf'] >= conf_threshold:
+            best = (i, tok, price)
+            break
+    if best is None:
+        best = candidates[-1]
+
+    idx, price_tok, price = best
+
+    if not is_total and price > max_item_price:
+        return None, None, is_total
+
+    name_parts = []
+    for t in tokens:
+        if t['left'] < price_tok['left']:
+            name_parts.append(t['text'])
+        elif t is price_tok:
+            break
+
+    item_name = ' '.join(name_parts).strip()
+    item_name = re.sub(r'^[\s\-:.*#]+', '', item_name)
+    item_name = re.sub(r'[\s\-:.*#]+$', '', item_name)
+    item_name = re.sub(r'\s+', ' ', item_name).strip()
+
+    if not item_name:
+        item_name = line_text.replace(price_tok['text'], '').strip()
+        item_name = re.sub(r'\s+', ' ', item_name).strip()
+
+    if not item_name:
+        return None, None, is_total
+
+    return item_name, price, is_total
 
 # ---------- process a single file ----------
 def process_image_file(path, args):
-    """
-    Process a single image file path:
-      - read image with cv2.imread
-      - preprocess
-      - run tesseract (run_tesseract_image_to_data)
-      - cluster tokens into lines (cluster_tokens_into_lines)
-      - pick store name (pick_store_name)
-      - parse each line for items (parse_line_for_item)
-      - compute computed_total as sum(items) and capture printed_total when found
-    Returns: (store, items_list, computed_total, printed_total)
-    """
-    # TODO: implement orchestration using the helper functions above.
-    raise NotImplementedError("process_image_file: TODO implement full file processing pipeline")
+    img_bgr = cv2.imread(path)
+    if img_bgr is None:
+        raise ValueError(f"Could not read image: {path}")
+
+    processed = preprocess(img_bgr, target_w=args.target_width)
+    data = run_tesseract_image_to_data(processed, psm=args.psm)
+    lines = cluster_tokens_into_lines(data)
+
+    if not lines:
+        return 'Unknown Store', [], 0.0, None
+
+    top_lines = [l['line_text'] for l in lines[:5]]
+    store = pick_store_name(top_lines)
+
+    items = []
+    printed_total = None
+
+    for line_obj in lines:
+        item_name, price, is_total = parse_line_for_item(line_obj, args.conf, args.max_item)
+        if item_name is None or price is None:
+            continue
+        if is_total:
+            printed_total = price
+        else:
+            items.append((item_name, price))
+
+    computed_total = round(sum(p for _, p in items), 2)
+    return store, items, computed_total, printed_total
 
 # ---------- CSV I/O ----------
 def write_csv_rows(rows, out_path):
