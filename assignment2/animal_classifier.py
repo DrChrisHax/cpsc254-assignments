@@ -446,7 +446,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Classify images in folder structure using pretrained ResNet (ImageNet weights). Improved mapping to ImageNet labels.")
-    parser.add_argument("--data-dir", type=str, default="../datasets/animals", help="Path to dataset root (folders of classes)")
+    parser.add_argument("--data-dir", type=str, default="datasets/animals", help="Path to dataset root (folders of classes)")
     parser.add_argument("--model", type=str, default="resnet50", help="ResNet variant: resnet18, resnet34, resnet50, resnet101, resnet152")
     parser.add_argument("--fuzzy-threshold", type=float, default=0.65, help="Fuzzy match threshold (0-1) for mapping and fallback matching.")
     parser.add_argument("--label-map", type=str, default="", help="Optional JSON file mapping folder names to ImageNet labels/indices.")
